@@ -32,6 +32,10 @@ import numpy as np
 import sklearn.cluster
 import distance
 
+## Preprocessing
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import QuantileTransformer
+
 ## Regression
 import statsmodels.api as sm
 from sklearn.model_selection import train_test_split
@@ -44,9 +48,155 @@ from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import GridSearchCV
 from pprint import pprint # print Sklearn model parameters
 import xgboost as xgb
+import torch
 
 class matlablike():
     pass
+
+############################################################################
+## Feature Engineering
+############################################################################
+
+def run_df_normalization(df,normType='std'):
+    if normType=='std':
+        print('- All columns standardized: (x-mean)/std ...')
+        scaled_features = StandardScaler().fit_transform(df)
+        #scaled_target_values = StandardScaler().fit_transform(target_values.reshape(-1, 1)) # Not working properly...
+        df = pd.DataFrame(scaled_features, index=df.index, columns=df.columns)
+    if normType=='quant':
+        print('- All columns Quantile Normalizer(output:Gaussian) ...')
+        scaled_features = QuantileTransformer().fit_transform(df)
+        df = pd.DataFrame(scaled_features, index=df.index, columns=df.columns)
+    return df
+
+def remove_outliers_df_up(dfx,percent,vars2rem,showplot=True):
+    df = dfx.copy()
+    print('Before:',df.shape)
+    for i in vars2rem:
+        t = np.percentile(df[i],100-percent)
+        mymax = np.max(df[i])
+        # remove
+        y2exclude = np.abs(df[i].values)>t
+        df = df.loc[~y2exclude]
+        t2add = 'excluded %d outliers (max=%2.4f)'%(y2exclude.sum(),mymax)
+        # plot
+        if showplot:
+            sns.distplot(df[i])
+            plt.plot([t, t], [0,1])
+            plt.text(t-1.1, .5,'%s%% treshold:%2.2f'%(percent,t), bbox=dict(facecolor='red', alpha=0.5))
+            plt.title('Removing outliers: '+ i +' (%s)'%(t2add))
+            plt.show()
+    print('After:',df.shape)
+    return df
+
+def remove_outliers_df_down(dfx,percent,vars2rem,showplot=True):
+    df = dfx.copy()
+    print('Before:',df.shape)
+    for i in vars2rem:
+        t = np.percentile(df[i],percent)
+        mymin = np.min(df[i])
+        # remove
+        y2exclude = np.abs(df[i].values)<t
+        df = df.loc[~y2exclude]
+        t2add = 'excluded %d outliers (min=%2.4f)'%(y2exclude.sum(),mymin)
+        if showplot:
+            # plot
+            sns.distplot(df[i])
+            plt.plot([t, t], [0,1])
+            plt.text(t-1.1, .5,'%s%% treshold:%2.2f'%(percent,t), bbox=dict(facecolor='red', alpha=0.5))
+            plt.title('Removing outliers: '+ i +' (%s)'%(t2add))
+            plt.show()
+    print('After:',df.shape)
+    return df
+
+#####################################################################################################
+### SUPERVISED LEARNING #############################################################################
+#####################################################################################################
+
+
+## Basic linear regression using Pytorch
+# Ref: https://www.kaggle.com/aakashns/pytorch-basics-linear-regression-from-scratch/notebook
+    # You could enter your model as well as parameter...
+    # Define the model
+
+# Ref: good wrapper for running pytorch with sklearn pipeline
+# - https://www.kaggle.com/graymant/pytorch-regression-with-sklearn-pipelines
+
+def run_pytorch_linearReg(X, Y, stepsize=1e-5, nepochs=100):
+    '''
+    Simple regression:
+         Y = W*X + B
+
+    Sample data to try:
+    # Input (temp, rainfall, humidity)
+    inputs = np.array([[73, 67, 43],
+                   [91, 88, 64],
+                   [87, 134, 58],
+                   [102, 43, 37],
+                   [69, 96, 70]], dtype='float32')
+     # Targets (apples, oranges)
+    targets = np.array([[56, 70],
+                    [81, 101],
+                    [119, 133],
+                    [22, 37],
+                    [103, 119]], dtype='float32')
+                   '''
+
+    def model(x):
+        return x @ w.t() + b  # @ is for matrix multiplication: [5x3] x [3,2]
+
+    # MSE loss
+    def mse(t1, t2):
+        diff = t1 - t2
+        return torch.sum(diff * diff) / diff.numel()
+
+    print('- Running linear regression with Pytorch...')
+    # Convert inputs and targets to tensors
+    inputs = torch.from_numpy(X)
+    targets = torch.from_numpy(Y)
+    print('X:', inputs)
+    print('y:', targets)
+    # Weights and biases
+    nreg = len(inputs[0])
+    nout = len(targets[0])
+    w = torch.randn(nout, nreg, requires_grad=True)
+    b = torch.randn(nout, requires_grad=True)
+    # print(w)
+    # print(b)
+
+    # Generate predictions
+    preds = model(inputs)
+    print('- Initial prediction:',preds)
+
+    # Training steps
+    # 1. Predict
+    # 2. Calculate loss
+    # 3. Compute gradients with respect to parameters, i.e. w and b
+    # 4. Update the parameters based on the gradients (gradient descent)
+    # 5. Reset the gradient to zero
+
+    # Train for 100 epochs
+    for i in range(nepochs):
+        preds = model(inputs)
+        loss = mse(preds, targets)
+        loss.backward() # compute gradient
+        with torch.no_grad(): # no_grad will not do gradient operations and will speed-up!!
+            w -= w.grad * stepsize # Think on the curve of a loss function (concave down). If gradient is positive, we have to go left, decrease w, and vice-versa
+            b -= b.grad * stepsize
+            w.grad.zero_() # Has to reset gradient! Default is to do cumulative
+            b.grad.zero_()
+        if i%10==0:
+            print('-- Epoch %d: Loss=%2.4f...'%(i,loss))
+
+    # Calculate final loss
+    preds = model(inputs)
+    loss = mse(preds, targets)
+    print('- Final loss (MSE):',loss)
+    print('- Final prediction:',preds)
+
+
+    return preds,w, b
+
 
 #####################################################################################################
 ### SUPERVISED LEARNING #############################################################################
